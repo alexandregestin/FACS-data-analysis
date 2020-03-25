@@ -1,0 +1,248 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+********
+
+This notebook is used for analyzing FACS data and applying CATALYST package on clean .fcs files. This script considered that files have previously been filtered with flowJo and thus have a total of 92 features ($(FCS+SSC+14)*2*3+2}$)
+Files must have the same channels and the same size. 
+
+********
+
+Run this chunk to install and/or load the required packages.
+```{r include=FALSE}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+if (!require(flowCore)){
+    BiocManager::install('flowCore')}
+
+if (!require(flowWorkspace)){
+    BiocManager::install('flowWorkspace')}
+
+if (!require(CATALYST)){
+    BiocManager::install('CATALYST')}
+
+if (!require(flowClust)){
+    BiocManager::install('flowClust')}
+
+if (!require(flowViz)){
+    BiocManager::install('flowViz')}
+
+if (!require(flowStats)){
+    BiocManager::install('flowStats')}
+
+if (!require(scater)){
+    install.packages('scater')}
+
+if (!require(tibble)){
+  install.packages("tibble")}
+
+if (!require(RColorBrewer)){
+  install.packages("RColorBrewer")}
+
+library(flowCore)
+library(flowWorkspace)
+library(CATALYST)
+library(flowClust)
+library(flowViz)
+library(scater)
+library(tibble)
+library(RColorBrewer)
+library(stringr)
+library(flowStats)
+```
+
+Run this chunk to import datasets
+USER HAVE TO SET THE DATA PATH FROM THE home ( ~/ ) DIRECTORY
+```{r}
+#SET PATH FOR IMPORT
+data_path='Documents/McGill_Neuro/Datasets/Julien/downsampled'
+setwd('~/')
+exp=read.flowSet(path=data_path,transformation =FALSE ,emptyValue = FALSE,package="flowCore")
+
+#GET NAMES
+files_names=vector()
+for (name in exp@phenoData@data$name){
+  files_names<-c(files_names,paste(c(data_path,name),collapse='/'))
+} 
+names=unlist(lapply(files_names, function(x){sapply(strsplit(x,"/"),tail,1)}))
+
+#PRINT EXPERIENCES IN FOLDER
+print(paste0(length(names)," experiences detected : "))
+print(names)
+
+#ATTRIBUTION OF COLORS
+expcounts=fsApply(exp,function(x){nrow(x)})
+colors=rainbow(length(names))
+names(colors)=names
+expcol=c()
+for (i in names){
+  expcol=append(expcol,rep(colors[i],expcounts[i,]))
+}
+```
+
+Apply this chunk to subset only area for each channels (i.e column name finishing by character "A")
+```{r include=FALSE}
+library(dplyr)
+exp=fsApply(exp,function(x){x[ ,grepl("A$",colnames(exp))]})
+```
+
+If you used FlowJo transformation before, run this chunk to subset the data from FlowJo
+```{r}
+library(dplyr)
+exp=fsApply(exp,function(x){x[ ,grepl("^[{'FJComp'}|{'FCS'}|{'SSC'}]",colnames(exp))]})
+```
+
+#Run this chunk for filtering extreme values on selected channels (FSC-H, SSC-H by default)
+```{r}
+#if (!require(flowTrans)){
+#    BiocManager::install('flowTrans')}
+#library('flowTrans')
+
+#exp=fsApply(exp,function(ff){
+#  n2f<-norm2Filter(filterId="myNorm2Filter", x=list("FSC-H", "SSC-H"),
+#scale.factor=2)
+#  filter_ff <- filter(ff,n2f)
+#  Subset(ff,n2f)
+#})
+```
+
+Do not run this chunk if you already transformed the data with FlowJo. Run this chunck to transform data with mclMultiArcsinh. (Do not use it if importing files from flowJo)
+```{r include=FALSE}
+data_trans=fsApply(exp[,c(1:48)],function(x){flowTrans(x,"mclMultivArcSinh",colnames(x)[7:48],n2f=FALSE,parameters.only=FALSE);})
+exp=flowSet(lapply(data_trans,function(x){x$result}))
+```
+
+Run this chunck for computing phenoGraph clutering on the data
+```{r include=FALSE}
+if (!require(Rphenograph)){
+  install.packages("Rphenograph")
+}
+library(Rphenograph)
+
+phg.frames=concatFCS(exp)
+phg.res=Rphenograph(phg.frames@exprs[,grepl("^x*FJComp",colnames(phg.frames))],)
+
+id_cells_clust=phg.res[[2]]
+phg.modul=modularity(phg.res[[2]])
+phg.member=membership(phg.res[[2]])
+phg.member=as.factor(phg.member)
+
+colors=rainbow(length(unique(phg.member)))
+names(colors)=unique(phg.member)
+```
+
+Run this chunck to compute UMAP and visualize data from (clustering & samples colouring) (TIME CONSUMING)
+(If not from flowJo, set the right columns)
+```{r fig.height=10, fig.width=16.1803398875}
+if (!require(umap)){
+  install.packages("umap")
+}
+library(umap)
+
+umap<-umap(phg.frames@exprs[,grepl("x*FJComp",colnames(phg.frames))])###If user does not use flowJo, replace by umap<-umap(phg.frames@exprs[,3:ncol(phg.frames)])
+
+color=rainbow(length(unique(phg.member)))
+names(color)=unique(phg.member)
+
+plot(umap$layout,col=color[as.character(phg.member)],pch=20, cex=0.2, main="umap (phenograph clusters)")
+plot(umap$layout,col=expcol,pch=20, cex=0.1,main="umap (samples)")
+
+```
+
+Run this chunck to compute T-SNE and visualize data from (clustering & samples colouring)
+```{r fig.height=10, fig.width=16.1803398875}
+if (!require(Rtsne)){
+  install.packages("Rtsne")
+}
+library("Rtsne")
+
+colors=rainbow(length(unique(phg.member)))
+names(colors)=unique(phg.member)
+tsne <- Rtsne(phg.frames@exprs[,grepl("x*FJComp",colnames(phg.frames))], dims = 2, perplexity=30, verbose=TRUE, max_iter = 500)
+
+plot(tsne$Y,col=color[as.character(phg.member)],pch=20,  cex= 0.2,main="t-sne (phenograph clusters)")
+legend(16,10,legend=as.vector(unique(phg.member)),col=nice_colors,pch=20)
+plot(tsne$Y,col=expcol,pch=20, cex= 0.2, main="t-sne (samples)")
+legend("topright",legend=as.vector(exp@phenoData@data$name),col=nice_colors,pch=20)
+
+```
+
+Run this chunk for computing metadata and panel from experiences & compute the sce object (MANDATORY FOR CATALYST)
+
+
+(This code uses the first file in the folder as template for channels and antigen identification)
+```{r include=FALSE}
+md=tibble(file_name=files_names,
+           sample_id=as.vector(exp@phenoData@data$name),
+           condition=rep('cond',length(rownames(exp@phenoData))),
+           patient_id=unlist(lapply(files_names, function(x){sapply(strsplit(x,"/"),tail,1)})))
+
+#PANEL
+#USES THE FIRST FLOWFRAME  IN THE FLOWSET AS TEMPLATE
+
+panel=tibble(fcs_colname=colnames(exp),
+                 antigen=str_replace_all(str_replace_all(str_replace_all(str_replace_all(exp[[1]]@parameters@data$desc[duplicated(exp[[1]]@parameters@data$desc)==FALSE]," ","_"),"-","_"),"<","_"),">","_"),
+                 marker_class=c(rep("state",2),rep("type",14))) ###
+
+#CREATING Single Cell Experiment
+sce=prepData(exp,md=md,panel=panel,cofactor=250)
+```
+
+Run this chunk to plot the density of expression data
+```{r fig.height=10, fig.width=16.1803398875}
+plotExprs(sce, color_by = "sample_id")
+```
+
+Run this chunk to plot Expression data
+```{r fig.height=10, fig.width=16.1803398875}
+plotExprHeatmap(sce, bin_anno = TRUE, row_anno = TRUE,palette = brewer.pal(n = 8, name = "Blues"))
+```
+Run this chunk to plot NRS (Non-redundancy scores) and MDS (multidimensional scaling)
+```{r fig.height=10, fig.width=16.1803398875}
+plotNRS(sce,color_by = 'patient_id')
+CATALYST::plotMDS(sce,color_by = "sample_id")
+```
+
+```{r}
+scc <- CATALYST::cluster(sce, features = type_markers(sce),
+    xdim = 15, ydim = 15, maxK = 30, seed = 1234)
+plot(scc@metadata$delta_area)
+```
+
+```{r}
+plotClusterHeatmap(scc, k = "meta15", draw_freqs = TRUE)
+```
+
+```{r fig.height=10, fig.width=16.1803398875}
+plotClusterExprs(scc, k = "meta20", features = "type")
+```
+
+
+
+```{r fig.height=10, fig.width=16.1803398875}
+scu <- runDR(scc, dr = "UMAP", cells = 1e3, features = "type")
+plotDR(scu, "UMAP", color_by = "patient_id")
+```
+
+```{r fig.height=10, fig.width=16.1803398875}
+plotDR(scu, "UMAP", color_by = "meta10") + facet_wrap("patient_id") +
+    guides(color = guide_legend(ncol = 2, override.aes = list(size = 3)))
+```
+
+
+```{r}
+plotCodes(scu, k = "meta20")
+```
+
+```
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+
