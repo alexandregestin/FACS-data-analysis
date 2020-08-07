@@ -69,12 +69,21 @@ devtools::install_github("JinmiaoChenLab/Rphenograph")
 
 require("Rphenograph")
 source("basic_functions.R")
+source("/home/rhalena/Desktop/GITHUB/FACS-data-analysis/basic_functions.R")
+
 ```
 
 ##Read the data
 ```{r,include=FALSE}
+
+# clear workspace
+rm(list = ls())
+
 #Set the path of the file from the working directory
-data_path="/home/alx/Documents/McGill_Neuro/Datasets/FACS_Paper/FIG2-A" 
+# Alex
+data_path="/home/alx/Documents/McGill_Neuro/Datasets/FACS_Paper/FIG2"
+#Rhalena
+data_path="/home/rhalena/Documents/Documents/MyPapers/FACS/FCS files for bioinfo analysis/2020-04-20" 
 
 #make a flowset object
 exp=read.flowSet(path=data_path,transformation =FALSE ,emptyValue = FALSE,package="flowWorkspace")
@@ -87,11 +96,11 @@ exp=fsApply(exp,function(x){x[ ,grepl("^[{'FJComp'}|{'FCS'}|{'SSC'}].*A$",colnam
 
 # if the data is located in a different space or you don't have the same type of fcs file exported (not complete) 
 # don't run if the data is all the same folder and has all measures
-
-data_path="/home/alx/Documents/McGill_Neuro/Datasets/FACS_Paper/FIG2"
-exp1=read.flowSet(path=data_path,transformation =FALSE ,emptyValue = FALSE,package="flowWorkspace")
-exp1=fsApply(exp1,function(x){x[ ,grepl("^[{'FJComp'}|{'FCS'}|{'SSC'}].*A$",colnames(exp1))]})#SELECT COMPENSED CHANNELS AND AEA VALUES
-exp=rbind2(exp,exp1) #FlowSet object
+# 
+# data_path="/home/alx/Documents/McGill_Neuro/Datasets/FACS_Paper/FIG2"
+# exp1=read.flowSet(path=data_path,transformation =FALSE ,emptyValue = FALSE,package="flowWorkspace")
+# exp1=fsApply(exp1,function(x){x[ ,grepl("^[{'FJComp'}|{'FCS'}|{'SSC'}].*A$",colnames(exp1))]})#SELECT COMPENSED CHANNELS AND AEA VALUES
+# exp=rbind2(exp,exp1) #FlowSet object
 ```
 
 ##Subsetting
@@ -126,23 +135,27 @@ sampleNames(exp)
 ```
 +++++ ADD RENAME MARKERS WITH INPUT +++++++
 
-
+still to be added
 
 ##Transformation Step (Key step)
+Just choose one
 
-This one allows the biexp transformation (that suits best for comparing multiple datasets)
+1. Biexponential: This one allows the biexp transformation (that suits best for comparing multiple datasets)
+
 ```{r,echo=FALSE}
 biexp  <- biexponentialTransform("myTransform")
 expbe <- transform(exp, transformList(colnames(exp), biexp))
 ```
 
-This one allows to transform with optimized parameters or arcsinh transform. The parameters are based on maximum likelyhood assuming a normal distribution (it suits best the clustering of each file separately, lit.)
+2. Arcsinh:  This one allows to transform with optimized parameters or arcsinh transform. The parameters are based on maximum likelyhood assuming a normal distribution (it suits best the clustering of each file separately, lit.)
 ```{r,echo=FALSE}
 expmas=fsApply(exp, function(x){flowTrans(x,"mclMultivArcSinh"
                                        ,colnames(x)[vapply(colnames(x), function(y) all(grepl("^[{'FJComp'}|{'FCS'}|{'SSC'}].*A$", y)),logical(1))]
                                        ,n2f = FALSE,
                                        parameters.only = FALSE)$result} )
 ```
+
+3. What is this called? Can you change from the default parameters?
 
 This one (with default parameters) is sensibly the same as biexp with default parameters. Those transformations gives equivalent results on clustering or manual gating
 ```{r,echo=FALSE}
@@ -184,8 +197,12 @@ expbe_al=normtr$flowset
 #exp_al=fsApply(expbe_al,function(x){inv.biexp(x,params=colnames(x))})#Apply the retrotransformation. Require "wadetools" package
 
 #png(file="/home/alx/Documents/McGill_Neuro/Scripts/FACS_clustering/densityplot_expbe_rename.png",width=900*1.618,height=700)
-plotdensity_flowset(rename_markers(expbe))
-plotdensity_flowset(rename_markers(expbe_al))
+dp_expbe <- plotdensity_flowset(rename_markers(expbe))
+dp_expbe_al <- plotdensity_flowset(rename_markers(expbe_al))
+dp_expbe
+dp_expbe_al
+# better to have these plots in a grid but they look weird like that.  We should put one legend on the side
+# grid.arrange(dp_expbe, dp_expbe_al, nrow = 1) 
 #dev.off()
 ```
 
