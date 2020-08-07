@@ -232,7 +232,7 @@ object_name = paste(save_path,"Aug7_2020_" ,"tSNE_expbe_9col_1500_cells.Rdata",s
 saveRDS(tsne_expbe,object_name)
 
 # load a previously saved object -- enter the filepath and file name RData file
-#tsne_expbe <- load(object_name)
+tsne_expbe <- readRDS(object_name)
 
 # think about a saving argument in this function so that you can set it to TRUE, give a pathway or leave it as working directory and each file is saved, maybe a file prefix can be added as well
 plot_marker_tsne(expbe_al,tsne_expbe,c(1,2,9))
@@ -274,12 +274,15 @@ Rphenograph_flowset(flowet,columns to ignore, k, scale (boolean)). Based on litt
 pheno_expbe_al=Rphenograph_flowset(expbe_al,colstoignore=c(1,2,9),k=250,scale=TRUE) #Apply the function
 
 # save the clustered object
-object_name = paste(save_path,"Aug7_2020_" ,"pheno_expbe_al_expbe_9col_1500_cells.Rdata",sep="")
+object_name = paste(save_path,"Aug7_2020_" ,"pheno_expbe_al_expbe__k250_9col_1500_cells.Rdata",sep="")
 saveRDS(pheno_expbe_al,object_name)
+
+# load the saved object
+#pheno_expbe_al <- readRDS(object_name)
 
 ```
 
-This chunck performs the flowSOM clustering (faster) and save the results in a variable. Another chunck will read this variable to get informations about the clustering results. You can have more informations about the parameters by typing "?FlowSOM" in the R console.  You can define a number of clusters by adding "nClus" in the parameters of the FlowSOM function
+This chunck performs the flowSOM clustering (faster) and save the results in a variable. Another chunck will read this variable to get informations about the clustering results. You can have more information about the parameters by typing "?FlowSOM" in the R console.  You can define a number of clusters by adding "nClus" in the parameters of the FlowSOM function
 ```{r}
 library(FlowSOM)
 flowSOM.clustering=GetMetaclusters(FlowSOM(expbe_al,pattern=".fcs",transform=FALSE, compensate = FALSE, spillover = NULL,colsToUse =  c(3:8,10:16),maxMeta = 30,nClus = 25 ))
@@ -296,13 +299,38 @@ This chunck will compute differential expression
 
 This chunck provides a plots and information about the clustering (number of cells per sample per cluster and mean values)
 ```{r}
-sample_per_cluster(pheno_expbe_al[[2]]$membership)
-mean_per_cluster(rename_markers(expbe_al),pheno_expbe_al[[2]]$membership,colstoignore = c(9))
 
+sample_per_cluster(pheno_expbe_al[[2]]$membership) # what does this do?
+# returns error : Error in order(y) : unimplemented type 'list' in 'orderVector1'
+# this worked the first time I ran it and then it didn't - is there some variable that needs to be reset?
+
+mean_per_cluster(rename_markers(expbe_al),pheno_expbe_al[[2]]$membership,colstoignore = c(9))
+# works
+
+ 
 #png(file="/home/alx/Documents/McGill_Neuro/Scripts/FACS_clustering/phenograph_retroexp_scaled_clusters_redim.png",width=1000*1.618,height=1000)
-plot_tsne_clust(tsne_expbe, pheno_expbe_al[[2]]$membership,"Phenograph clustering (k=350) of biexp transformed aligned scaled values of 9 MBOs with 1578 cells each")
+k = '250'
+settings = "biex transform, aligned"
+plot_title = paste("Phenograph clusters, k =",k,settings,sep = " ") 
+
+# again this worked the first time through and now it does not - probably because the sample_per_cluster was not run but I'm not sure
+
+pCtsne <- plot_tsne_clust(tsne_expbe, pheno_expbe_al[[2]]$membership,plot_title)
+pCtsne
+
+plot_tsne_clust(tsne_expbe, pheno_expbe_al[[2]]$membership,"Phenograph clustering (k=250) of biexp transformed aligned scaled values of 9 MBOs with 1578 cells each")
 #dev.off()
 heatmap_cluster(rename_markers(expbe_al),pheno_expbe_al[[2]]$membership,c(1,2,9))
+# what does this vector c(1,2,9) select?
+# works
+# remove 'cell' as upper x axis label
+
+hmap1 <- heatmap_cluster(rename_markers(expbe_al),pheno_expbe_al[[2]]$membership,c(1,2,9))
+
+png(file= (paste(save_path,"heatmap_Rpheno_k250.png",sep="")),width=1000*1.618,height=1000)
+hmap1
+dev.off()
+
 ```
 
 do.call("grid.arrange", c(myplots, ncol=nCol))
@@ -310,7 +338,10 @@ do.call("grid.arrange", c(myplots, ncol=nCol))
 
 #To assign these clusters to cell profiles automatically use the following chunck. User need to import an expected expression table by phenotype
 ```{r}
-norm_cellpheno=read.csv(file="/home/alx/Documents/McGill_Neuro/Datasets/FACS_Paper/ExpessionCellPhenotypeTable3.csv")
+# load the reference table 
+reference_table = "/home/rhalena/Documents/Documents/MyPapers/FACS/Analysis/ManualAnalysis/ExpessionCellPhenotypeTable3.csv"
+norm_cellpheno=read.csv(file= reference_table)
+#norm_cellpheno=read.csv(file="/home/alx/Documents/McGill_Neuro/Datasets/FACS_Paper/ExpessionCellPhenotypeTable3.csv")
 
 cluster_correlation_by_cell=correlation_cluster_celltype(expbe_al,membership(pheno_expbe_al[[2]]),norm_cellpheno,c(1,2,9))
 
