@@ -79,11 +79,14 @@ source("/home/rhalena/Desktop/GITHUB/FACS-data-analysis/basic_functions.R")
 # clear workspace
 rm(list = ls())
 
-#Set the path of the file from the working directory
+#Set the path of the data folder
 # Alex
 data_path="/home/alx/Documents/McGill_Neuro/Datasets/FACS_Paper/FIG2"
 #Rhalena
 data_path="/home/rhalena/Documents/Documents/MyPapers/FACS/FCS files for bioinfo analysis/2020-04-20" 
+
+# set the path to where you would like to save outputs
+save_path = "/home/rhalena/Desktop/GITHUB/FACS-data-analysis/output/"
 
 #make a flowset object
 exp=read.flowSet(path=data_path,transformation =FALSE ,emptyValue = FALSE,package="flowWorkspace")
@@ -197,13 +200,20 @@ expbe_al=normtr$flowset
 #exp_al=fsApply(expbe_al,function(x){inv.biexp(x,params=colnames(x))})#Apply the retrotransformation. Require "wadetools" package
 
 #png(file="/home/alx/Documents/McGill_Neuro/Scripts/FACS_clustering/densityplot_expbe_rename.png",width=900*1.618,height=700)
+# we need titles on these plots
 dp_expbe <- plotdensity_flowset(rename_markers(expbe))
 dp_expbe_al <- plotdensity_flowset(rename_markers(expbe_al))
 dp_expbe
 dp_expbe_al
-# better to have these plots in a grid but they look weird like that.  We should put one legend on the side
-# grid.arrange(dp_expbe, dp_expbe_al, nrow = 1) 
-#dev.off()
+
+# save_path was deffined in chunk at the begining of the notebook
+file_name = paste(save_path,"density_plots_expbe_pre_post_alignment.png",sep="")
+# better to have these plots in a grid but they look weird like that.  We should put only one legend on the side
+png(file=file_name, width=900*1.618,height=700)
+grid.arrange(dp_expbe, dp_expbe_al, nrow = 1) 
+dev.off()
+
+
 ```
 
 
@@ -218,7 +228,16 @@ sample=getsample(expbe_al)
 
 plot_tsne(tsne_expbe,"tsne")
 #saveRDS(tsne_expbe,file="/home/alx/Documents/McGill_Neuro/Scripts/FACS_clustering/REFERENCE_TSNE_1578_expbe_col9.RData")
+object_name = paste(save_path,"Aug7_2020_" ,"tSNE_expbe_9col_1500_cells.Rdata",sep="")
+saveRDS(tsne_expbe,object_name)
+
+# load a previously saved object -- enter the filepath and file name RData file
+#tsne_expbe <- load(object_name)
+
+# think about a saving argument in this function so that you can set it to TRUE, give a pathway or leave it as working directory and each file is saved, maybe a file prefix can be added as well
 plot_marker_tsne(expbe_al,tsne_expbe,c(1,2,9))
+
+
 ```
 
 If you prefer umap, it has to be adapted for more figures. 
@@ -229,6 +248,8 @@ plot_umap(umap_expbe,"hasar")
 
 ------- Just for "fun", a 3D tsne ---------
 ```{r}
+# this should be taken out or changed to the flow data
+
 library(car)
 library(rgl)
 tsne_expbe30=tsne_flowset(expbe_al,scale=TRUE,colstoignore = c(9) ,dims = 3, perplexity=30,theta=0.5, verbose=FALSE, max_iter = 1000,eta=500)
@@ -245,9 +266,17 @@ scatter3d(x=tsne_expbe30$Y[,1],y=tsne_expbe30$Y[,2],z=tsne_expbe30$Y[,3],point.c
 Clustering
 
 This chunck performs the Phenograph clustering and save the results in a variable. Another chunck will read this variable to get informations about the clustering results.
-Rphenograph_flowset(flowet,columns to ignore, k, scale (boolean)). Based on litterature, golden standard is to not consider FSC and SSC channels, neither the eventual Live - Dead channel. K corresponds to the initial K-NN graph computed by the phenograph method. 
+Rphenograph_flowset(flowet,columns to ignore, k, scale (boolean)). Based on litterature, golden standard is to not consider FSC and SSC channels, nor the Live - Dead channel (if present). K corresponds to the initial K-NN graph computed by the phenograph method. Lower values of k yield a greater number of groups.
+
 ```{r}
-pheno_expbe_al=Rphenograph_flowset(expbe_al,colstoignore=c(1,2,9),k=350,scale=TRUE) #Apply the function
+# this function will take a long time to run. The computation lenght increases with cell number
+
+pheno_expbe_al=Rphenograph_flowset(expbe_al,colstoignore=c(1,2,9),k=250,scale=TRUE) #Apply the function
+
+# save the clustered object
+object_name = paste(save_path,"Aug7_2020_" ,"pheno_expbe_al_expbe_9col_1500_cells.Rdata",sep="")
+saveRDS(pheno_expbe_al,object_name)
+
 ```
 
 This chunck performs the flowSOM clustering (faster) and save the results in a variable. Another chunck will read this variable to get informations about the clustering results. You can have more informations about the parameters by typing "?FlowSOM" in the R console.  You can define a number of clusters by adding "nClus" in the parameters of the FlowSOM function
@@ -265,7 +294,7 @@ This chunck will compute differential expression
 
 
 
-This chunck provides a plots and informations about the clustering (number of cells per sample per cluster and mean values)
+This chunck provides a plots and information about the clustering (number of cells per sample per cluster and mean values)
 ```{r}
 sample_per_cluster(pheno_expbe_al[[2]]$membership)
 mean_per_cluster(rename_markers(expbe_al),pheno_expbe_al[[2]]$membership,colstoignore = c(9))
