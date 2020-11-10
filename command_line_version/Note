@@ -1,0 +1,1 @@
+These files contains functions to run in command line. Each of this script contains a help you can call with "Rscript script.R -h" 
