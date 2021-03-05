@@ -1,0 +1,288 @@
+---
+title: "FIGURES PhenoID: A framework to identify and explore cellular phenotypes in human organoids using a flow cytometry antibody panel"
+output: pdf
+---
+Few libraries
+```{r,include=FALSE}
+require("flowCore") #Used for reading the data
+require("flowTrans") #Used for transforming data
+require("tidyverse")
+require("stringr") #set of functions to manipulate strings type in order to have nice titles
+require("rlist") #set of functions that allows to easely manipulate lists
+require("reshape2") #visualization
+require("scales") #scale colour intensity for visualization
+
+# for clustering we use Rphenograph which needs to be installed directly from the github of JinmiaoChen Lab
+if(!require(devtools)){
+  install.packages("devtools") # If not already installed
+}
+devtools::install_github("JinmiaoChenLab/Rphenograph")
+require("Rphenograph") #apply rphenograph clustering (Louvain method)
+#Defines few functions to help
+rename_markers<-function(flowset){#Defines a function to use marker names 
+  copy_flowset=flowset[seq(along=flowset)]
+  for (i in 1:length(copy_flowset)){
+    marker.names=copy_flowset[[i]]@parameters@data$desc
+    marker.names=lapply(marker.names,function(x){str_replace_all(x,"-","_")})
+    colnames(copy_flowset[[i]]@exprs)<-unlist(lapply(marker.names, function(x){sapply(str_split(x,"_"),head,1)})) 
+  }
+  return(copy_flowset)
+}
+output_path="/home/alx/Documents/McGill_Neuro/Scripts/PhenoID/figures_paper/"
+```
+
+###FIGURE 1-b
+Read in the data
+```{r}
+#Set the path of the file from the working directory
+data_path="/home/alx/Documents/McGill_Neuro/Datasets/FACS_Paper/FIG2-A" 
+
+#make a flowset object
+exp=read.flowSet(path=data_path,transformation =FALSE ,emptyValue = FALSE,package="flowWorkspace")
+# emptyValue = False doesn't consider empty rows
+
+#select compensated channels, FCS and SSC that finishes by A (indicating the aea value) using regular expression
+exp=fsApply(exp,function(x){x[ ,grepl("^[{'FJComp'}|{'FCS'}|{'SSC'}].*A$",colnames(exp))]})
+#Still a flowset (fsApply -> apply a function to a flowset)
+
+# if the data is located in a different space or you don't have the same type of fcs file exported (not complete) 
+# don't run if the data is all the same folder and has all measures
+
+data_path="/home/alx/Documents/McGill_Neuro/Datasets/FACS_Paper/FIG2"
+exp1=read.flowSet(path=data_path,transformation =FALSE ,emptyValue = FALSE,package="flowWorkspace")
+exp1=fsApply(exp1,function(x){x[ ,grepl("^[{'FJComp'}|{'FCS'}|{'SSC'}].*A$",colnames(exp1))]})#SELECT COMPENSED CHANNELS AND AEA VALUES
+flowset=rbind2(exp,exp1) #FlowSet object
+```
+
+Facultative subsetting
+```{r}
+desired_size=1000
+```
+Set the number to the smallest fcs files (containing the smallest amount of cells)
+```{r}
+desired_size=min(fsApply(flowset,function(x){nrow(x@exprs)}))
+```
+Subsets the data
+```{r}
+set.seed(42) #Set a seed for reproducibility 
+sf=sampleFilter(filterId = "SizeFilter", size =desired_size) #Creates a "filter" object to subset
+flowset=fsApply(flowset,function(x){Subset(x,sf)}) #apply the filter on every flowframe
+```
+
+Check names
+```{r}
+sampleNames(flowset) #Prints the name of each flowframe inside the flowset. User can modify it in the following chunck
+```
+
+```{r}
+sampleNames(flowset)<-c("3450c2","AIW2","AJG2","3450c1","3450c3","AIW1","AIW3","AJG1","AJG3") #directly modify the names inside the flowset
+sampleNames(flowset)
+
+#Transformation 
+biexp  <- biexponentialTransform("biexp transform",a = 0.5, b = 1, c = 0.5, d = 1, f = 0, w = 0) #creates the transformation object
+transformed_flowset <- transform(flowset, transformList(colnames(flowset), biexp)) #Apply the transformation
+organo_transformed_flowset<-transformed_flowset#store for further usage
+list_of_flowframes=fsApply(rename_markers(transformed_flowset),function(x){as.data.frame(x@exprs[,-c(1,2,9)])})#Makes a list of dataframes without FSC SSC and LiveDead markers
+#hierarchical clustering for the heatmap
+hclust=lapply(list_of_flowframes, function(x){hclust(dist(x,method="euclidean"),method="ward.D")$order})
+
+#Reorder each list with the orders stored in hclust
+for (i in names(list_of_flowframes)){
+  list_of_flowframes[[i]]=list_of_flowframes[[i]][hclust[[i]],]
+}
+
+#Add order of cells for ploting the result
+list_names=names(list_of_flowframes)#extract names for not calling names() function at each loop
+for (index in seq_along(list_of_flowframes)){ #Iterates along the index
+  list_of_flowframes[[index]]=list_of_flowframes[[index]] %>% #Using tidyverse for adding features
+    mutate(Cells=as.factor(c(1:nrow(list_of_flowframes[[index]]))))
+}
+#Melt the result
+mlf=melt(list_of_flowframes)
+#Better names
+colnames(mlf)<-c("Cells","marker","value","batch")
+#order the melted dataframe in alphabetical order. We can impose a specific order by changing "levels"
+mlf$marker=ordered(mlf$marker,levels=as.vector(unique(mlf$marker))[order(as.vector(unique(mlf$marker)))])
+
+#plot
+pdf(file =paste0(output_path,"mbos_heatmap.pdf"),11.7,8.3)#writes pdf (values are inches)
+ggplot(mlf,aes(x=Cells,y=marker,fill=value))+geom_raster(size=0.5)+
+  scale_fill_gradient2(low="cyan2", high ="darkorchid3")+
+  scale_x_discrete(labels=mlf$batch,position = "top")+
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        strip.text.x = element_text(face="bold",size=12,angle=90),
+        axis.text.y = element_text(face="bold",size=12),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        strip.background = element_blank()
+        )+
+  facet_grid(~batch,scales="free",drop=FALSE)#heatmap
+dev.off()
+
+list_of_flowframes=fsApply(rename_markers(transformed_flowset),function(x){as.data.frame(x@exprs[,-9])})#Makes a list of dataframes
+list_names=names(list_of_flowframes)#extract names for not calling names() function at each loop
+for (index in seq_along(list_of_flowframes)){ #Iterates along the index
+  list_of_flowframes[[index]]=list_of_flowframes[[index]] %>% #Using tidyverse for adding features
+    mutate(Batch=list_names[index])
+}
+ds=list.rbind(list_of_flowframes)
+ds$cell=as.factor(unlist(lapply(as.list(c(1:length(transformed_flowset))),function(x){c(1:nrow(transformed_flowset[[x]]@exprs))})))#add cell IDs 
+write.csv(ds,file=paste0(output_path,"dataset_heatmap_mbos.csv"))
+
+write.table(apply(as.data.frame(list.rbind(lapply(sampleNames(transformed_flowset),function(name){transformed_flowset[[name]]@description}))),2,as.character),file=paste0(output_path,"mbo_facs_description.csv"),col.names = TRUE)#Save descriptions of each flowframe in a csv file
+```
+
+###FIGURE 2 --- Same procedure
+Reads in the data
+```{r}
+input_path="/home/alx/Documents/McGill_Neuro/Datasets/FACS_Paper/cell_line/"
+flowset=read.flowSet(path=input_path,transformation = FALSE ,emptyValue = FALSE,package="flowCore") #Create a flowset object
+flowset=fsApply(flowset,function(x){x[ ,grepl("^[{'FJComp'}|{'FCS'}|{'SSC'}].*A$",colnames(flowset))]})
+```
+Subsetting
+```{r}
+desired_size=5000
+```
+Set the number to the smallest fcs files (containing the smallest amount of cells)
+```{r}
+desired_size=min(fsApply(flowset,function(x){nrow(x@exprs)}))
+```
+Subsets the data
+```{r}
+set.seed(42) #Set a seed for reproducibility 
+sf=sampleFilter(filterId = "SizeFilter", size =desired_size) #Creates a "filter" object to subset
+flowset=fsApply(flowset,function(x){Subset(x,sf)}) #apply the filter on every flowframe
+sampleNames(flowset)
+```
+#This chunck can be used for renaming the fcs files inside the flowset
+```{r}
+sampleNames(flowset)<-c("AstroSmall","neurons","NPC","oligo","astrocyte","IPSC","NPC2","oligo-2")
+sampleNames(flowset)
+```
+###FIGURE 2-b
+```{r}
+#Transformation
+biexp  <- biexponentialTransform("biexp transform",a = 0.5, b = 1, c = 0.5, d = 1, f = 0, w = 0) #creates the transformation object
+transformed_flowset <- transform(flowset, transformList(colnames(flowset), biexp)) #Apply the transformation
+list_of_flowframes=fsApply(rename_markers(transformed_flowset),function(x){as.data.frame(x@exprs[,-c(1,2,9)])})#Makes a list of dataframes
+
+hclust=lapply(list_of_flowframes, function(x){hclust(dist(x,method="euclidean"),method="ward.D")$order})
+
+#Reorder each list with the orders stored in hclust
+for (i in names(list_of_flowframes)){
+  list_of_flowframes[[i]]=list_of_flowframes[[i]][hclust[[i]],]
+}
+
+list_names=names(list_of_flowframes)#extract names for not calling names() function at each loop
+for (index in seq_along(list_of_flowframes)){ #Iterates along the index
+  list_of_flowframes[[index]]=list_of_flowframes[[index]] %>% #Using tidyverse for adding features
+    mutate(
+      Cells=as.factor(c(1:nrow(list_of_flowframes[[index]]))))
+}
+
+mlf=melt(list_of_flowframes)
+
+colnames(mlf)<-c("Cells","marker","value","batch")
+mlf=mlf[mlf$batch != "AstroSmall",]
+mlf=mlf[mlf$batch != "NPC2",]
+
+mlf$marker=ordered(mlf$marker,levels=as.vector(unique(mlf$marker))[order(as.vector(unique(mlf$marker)))])#order by marker
+
+#plot
+pdf(file =paste0(output_path,"cell_line_heatmap.pdf"),11.7,8.3)#writes pdf (values are inches)
+ggplot(mlf,aes(x=Cells,y=marker,fill=value))+geom_raster(size=0.5)+
+  scale_fill_gradient2(low="cyan2", high ="darkorchid3")+
+  scale_x_discrete(labels=mlf$batch,position = "top")+
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        strip.text.x = element_text(face="bold",size=12,angle=90),
+        axis.text.y = element_text(face="bold",size=12),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        strip.background = element_blank()
+        )+
+  facet_grid(~batch,scales="free",drop=FALSE)#heatmap
+dev.off()
+
+list_of_flowframes=fsApply(rename_markers(transformed_flowset),function(x){as.data.frame(x@exprs[,-9])})#Makes a list of dataframes
+list_names=names(list_of_flowframes)#extract names for not calling names() function at each loop
+for (index in seq_along(list_of_flowframes)){ #Iterates along the index
+  list_of_flowframes[[index]]=list_of_flowframes[[index]] %>% #Using tidyverse for adding features
+    mutate(Batch=list_names[index])
+}
+ds=list.rbind(list_of_flowframes)
+ds$cell=as.factor(unlist(lapply(as.list(c(1:length(transformed_flowset))),function(x){c(1:nrow(transformed_flowset[[x]]@exprs))})))#add cell IDs 
+write.csv(ds,file=paste0(output_path,"dataset_heatmap_cell_lines.csv"))
+
+write.table(apply(as.data.frame(list.rbind(lapply(sampleNames(transformed_flowset),function(name){transformed_flowset[[name]]@description}))),2,as.character),file=paste0(output_path,"cells_facs_description.csv"),col.names = TRUE)#Save descriptions of each flowframe in a csv file
+```
+Just to have some clustering results
+```{r,echo=TRUE, results='hide'}
+clustering=Rphenograph_flowset(organo_transformed_flowset,colstoignore = c(1,2,9),k=150, scale = FALSE)
+```
+###FIGURE 3-b
+```{r}
+binded=cbind(list.rbind(lapply(as.list(rename_markers(organo_transformed_flowset)@frames),function(x){as.data.frame(x@exprs[,-c(1,2,9)])})),clustering[[2]]$membership)
+colnames(binded)[ncol(binded)]="cluster"
+binded$cluster=as.factor(binded$cluster)
+
+binded$Cells=as.factor(c(1:nrow(binded)))
+mlb=melt(binded)
+colnames(mlb)<-c("cluster","Cell","marker","value")
+
+mlb$marker=ordered(mlb$marker,levels=as.vector(unique(mlb$marker))[order(as.vector(unique(mlb$marker)))])
+pdf(file =paste0(output_path,"mbo_clustering_heatmap.pdf"),11.7,8.3)#writes pdf (values are inches)
+
+ggplot(mlb,aes(x=Cell,y=marker,fill=value))+geom_raster(size=0.5)+
+  scale_fill_gradient2(low="cyan2", high ="darkorchid3")+
+  scale_x_discrete(labels=mlf$batch,position = "top")+
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        strip.text.x = element_text(face="bold",size=12,angle=90),
+        axis.text.y = element_text(face="bold",size=12),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        strip.background = element_blank()
+        )+
+  facet_grid(~cluster,scales="free",drop=FALSE)#heatmap
+dev.off()
+
+```
+
+#Correlation
+which file and which flowset
+```{r}
+expected_values=read.csv(file="/home/alx/Documents/McGill_Neuro/Datasets/FACS_Paper/ExpessionCellPhenotypeTable3.csv")
+fs=organo_transformed_flowset
+```
+
+correlation
+```{r}
+#2 functions to help
+minmax_normalize <- function(x){return((x- min(x)) /(max(x)-min(x)))}
+compute_corr<-function(cell_profile,celltypes_profile){
+  celltypes=celltypes_profile[,c(3:ncol(celltypes_profile))]#3 because the first two columns of the given file are expected to be "annotation" and "marker"
+  res=as.vector(apply(celltypes,2,function(x){
+    cor(cell_profile[which(!is.na(x))],x[which(!is.na(x))])}))#If a marker is "na" it won't be considered for computing the correlation coef
+  names(res)<-colnames(celltypes)
+  return(res)
+}
+
+fs=rename_markers(fs) #Nice marker names
+facsdata=list.rbind(lapply(as.list(fs@frames),function(x){x=as.data.frame(x@exprs[,-9])})) #I had to remove the live-dead since it causes issues because it's not standardized
+facsdata=as.data.frame(scale(as.matrix(facsdata),scale=TRUE,center=TRUE))#zscore by marker
+facsdata=as.data.frame(apply(facsdata,2, minmax_normalize))#minmax normalize
+rownames(expected_values)=toupper(expected_values$X)#Writes in upper case to make sure there is no mistake
+colnames(facsdata)=toupper(colnames(facsdata))#same
+
+intersect_markers=intersect(colnames(facsdata),rownames(expected_values))#Get common markers
+intersect_markers=intersect_markers[order(intersect_markers)]#alphabetical order so there is no mistake
+expected_values=expected_values[intersect_markers,]#ordering
+facsdata=facsdata[,intersect_markers]#ordering
+correlation_table=t(apply(facsdata,1,compute_corr,expected_values))#apply and store correlations by applying compute_corr function
+assignments=t(apply(correlation_table,1,function(x){names(sort(x, decreasing=T))}))#get the list from the most resembling phenotype to the least resembling phenotype
+print(head(correlation_table))
+print(head(assignments))#Most resembling to less resembling 
+```
+
